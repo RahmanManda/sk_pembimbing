@@ -10,9 +10,9 @@ from thefuzz import process
 
 # ================= KONFIGURASI =================
 # Pastikan Token & ID ini BENAR
-TELEGRAM_TOKEN = "8543332667:AAGD95v990MLCGiUYz1Xv7YSgqX8oU-bMYY" 
+TELEGRAM_TOKEN = st.secrets["8543332667:AAGD95v990MLCGiUYz1Xv7YSgqX8oU-bMYY"]
 ADMIN_ID = "416111259"  # ID Telegram Bapak (String)
-GEMINI_API_KEY = "AIzaSyCvLMS-t4_7fFI_8IXyZKxF8nP5S2t5978" 
+GEMINI_API_KEY = st.secrets["AIzaSyCvLMS-t4_7fFI_8IXyZKxF8nP5S2t5978"]
 
 TEMPLATE_FILENAME = "template_sk.docx"
 DATABASE_DOSEN_FILE = "dosen.json"
@@ -252,4 +252,5 @@ with col_btn2:
                 else:
                     # Tampilkan Pesan Error Asli di Kotak Merah
                     st.error(f"❌ GAGAL KIRIM: {pesan_info}")
+
                     st.warning("Tips: Cek TELEGRAM_TOKEN dan ADMIN_ID di file app.py Anda.")
