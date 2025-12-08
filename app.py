@@ -3,16 +3,15 @@ import google.generativeai as genai
 import json
 import os
 import re
-import requests  # Library untuk mengirim data ke Telegram
+import requests
 from datetime import datetime
 from docxtpl import DocxTemplate
 from thefuzz import process
 
 # ================= KONFIGURASI (DIAMBIL DARI STREAMLIT SECRETS) =================
-# Pastikan kunci ini sudah ada di menu Settings -> Secrets di Streamlit Cloud
 TELEGRAM_TOKEN = st.secrets["TELEGRAM_TOKEN"]
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
-ADMIN_ID = "416111259"  # ID Telegram Admin/Bapak (Sudah dikoreksi)
+ADMIN_ID = "416111259"
 
 TEMPLATE_FILENAME = "template_sk.docx"
 DATABASE_DOSEN_FILE = "dosen.json"
@@ -28,20 +27,18 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# Setup AI (Hanya gunakan FLASH untuk stabilitas kuota)
+# Setup AI (KOREKSI: Tambah 'models/' di nama model)
 try:
     genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("models/gemini-1.5-flash") 
 except Exception as e:
     st.error(f"❌ Error Setup AI. Cek GEMINI_API_KEY di Secrets: {e}")
 
 # ================= FUNGSI TELEGRAM =================
 def kirim_ke_admin_telegram(file_path, data_mhs):
-    """Mengirim file dari Web App langsung ke Telegram Admin"""
     clean_token = TELEGRAM_TOKEN.strip()
     url = f"https://api.telegram.org/bot{clean_token}/sendDocument"
     
-    # Logika konversi 08... menjadi 62...
     nomor_wa = data_mhs['wa'].strip()
     if nomor_wa.startswith("0"): wa_link = "62" + nomor_wa[1:]
     elif nomor_wa.startswith("62"): wa_link = nomor_wa
@@ -241,9 +238,7 @@ with col_btn2:
                     doc.save(out)
                 except Exception as e:
                     st.error(f"❌ Gagal Generate Dokumen: {e}")
-                    # HAPUS BARIS 'return' DI SINI
-                    # (Sudah dihapus di kode ini, jadi aman)
-                    pass 
+                    pass # Lanjut ke pengiriman, dokumen tetap ada di server
 
                 # 2. Kirim ke Telegram
                 sukses, pesan_info = kirim_ke_admin_telegram(out, d)
@@ -255,4 +250,3 @@ with col_btn2:
                 else:
                     st.error(f"❌ GAGAL KIRIM: {pesan_info}")
                     st.warning("Tips: Cek TELEGRAM_TOKEN dan ADMIN_ID di Secrets Anda.")
-
