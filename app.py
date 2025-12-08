@@ -3,23 +3,23 @@ import google.generativeai as genai
 import json
 import os
 import re
-import requests  # <--- Library baru untuk kirim ke Telegram
+import requests  # Library untuk mengirim data ke Telegram
 from datetime import datetime
 from docxtpl import DocxTemplate
 from thefuzz import process
 
-# ================= KONFIGURASI =================
-# Pastikan Token & ID ini BENAR
+# ================= KONFIGURASI (DIAMBIL DARI STREAMLIT SECRETS) =================
+# Pastikan kunci ini sudah ada di menu Settings -> Secrets di Streamlit Cloud
 TELEGRAM_TOKEN = st.secrets["TELEGRAM_TOKEN"]
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
-ADMIN_ID = "416111259"  # ID Telegram Bapak (String)
+ADMIN_ID = "416111259"  # ID Telegram Admin/Bapak
 
 TEMPLATE_FILENAME = "template_sk.docx"
 DATABASE_DOSEN_FILE = "dosen.json"
 
 st.set_page_config(page_title="SK Pembimbing", page_icon="🎓", layout="centered")
 
-# CSS Styling
+# CSS Styling (Untuk kerapian di HP)
 st.markdown("""
     <style>
     .stButton>button { width: 100%; border-radius: 10px; height: 3em; font-weight: bold; }
@@ -28,30 +28,24 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# Setup AI
+# Setup AI (Hanya gunakan FLASH untuk stabilitas kuota)
 try:
     genai.configure(api_key=GEMINI_API_KEY)
-    model_flash = genai.GenerativeModel("gemini-1.5-flash")
-    #model_pro = genai.GenerativeModel("gemini-1.5-pro")
-except:
-    st.error("API Key belum diset!")
+    model = genai.GenerativeModel("gemini-1.5-flash")
+except Exception as e:
+    st.error(f"❌ Error Setup AI. Cek GEMINI_API_KEY di Secrets: {e}")
 
-# ================= FUNGSI KIRIM TELEGRAM =================
+# ================= FUNGSI TELEGRAM =================
 def kirim_ke_admin_telegram(file_path, data_mhs):
-    # Bersihkan Token
+    """Mengirim file dari Web App langsung ke Telegram Admin"""
     clean_token = TELEGRAM_TOKEN.strip()
     url = f"https://api.telegram.org/bot{clean_token}/sendDocument"
     
-    # --- LOGIKA KONVERSI WA (DIAM-DIAM) ---
+    # Logika konversi 08... menjadi 62...
     nomor_wa = data_mhs['wa'].strip()
-    # Jika diawali 0, ganti jadi 62. Jika diawali 62, biarkan.
-    if nomor_wa.startswith("0"):
-        wa_link = "62" + nomor_wa[1:]
-    elif nomor_wa.startswith("62"):
-        wa_link = nomor_wa
-    else:
-        # Jaga-jaga jika user lupa nulis 0 atau 62
-        wa_link = "62" + nomor_wa
+    if nomor_wa.startswith("0"): wa_link = "62" + nomor_wa[1:]
+    elif nomor_wa.startswith("62"): wa_link = nomor_wa
+    else: wa_link = "62" + nomor_wa
     
     caption = (
         f"🚨 **PENGAJUAN SK VIA WEB**\n\n"
@@ -70,6 +64,7 @@ def kirim_ke_admin_telegram(file_path, data_mhs):
             else: return False, f"Error Telegram ({resp.status_code}): {resp.text}"
     except Exception as e:
         return False, f"Error Sistem: {str(e)}"
+
 # ================= FUNGSI HELPER LAINNYA =================
 def load_database_dosen():
     if os.path.exists(DATABASE_DOSEN_FILE):
@@ -108,10 +103,28 @@ def clean_json(txt):
     if m: return json.loads(m.group(0))
     return None
 
+# ================= FUNGSI AI (HANYA FLASH) =================
+
+def ai_cover(path):
+    prompt = """Analisis Cover. Ambil: 1.Judul(KAPITAL), 2.Nama(Bersih), 3.NIM(Angka), 4.Prodi. JSON: {"judul":"..","nama":"..","nim":"..","prodi":".."}"""
+    try:
+        f_ai = genai.upload_file(path)
+        res = model.generate_content([f_ai, prompt])
+        return clean_json(res.text)
+    except: return None
+
+def ai_wadek(path):
+    prompt = """Analisis tulisan tangan. Cari Pembimbing 1 & 2. JSON: {"pb1":"..","pb2":".."}"""
+    try:
+        f_ai = genai.upload_file(path)
+        res = model.generate_content([f_ai, prompt])
+        return clean_json(res.text)
+    except: return None
+
 # ================= UI APLIKASI =================
 
 st.title("🎓 SK Pembimbing")
-st.caption("Prodi MPI - IAIN Ternate")
+st.caption("Fakultas Tarbiyah & Ilmu Keguruan")
 
 # Init Session
 if 'data' not in st.session_state: 
@@ -119,13 +132,7 @@ if 'data' not in st.session_state:
 
 # --- BAGIAN 0: INPUT WA ---
 st.info("📱 **Data Kontak**")
-
-# Biarkan mahasiswa mengetik biasa (08...) tidak perlu dipaksa jadi 62 di layar
-wa_input = st.text_input("Nomor WhatsApp (Untuk menerima surat PDF)", 
-                         st.session_state.data['wa'], 
-                         placeholder="Contoh: 08123456789")
-
-# Simpan apa adanya dulu
+wa_input = st.text_input("Nomor WhatsApp (Contoh: 08123456789)", st.session_state.data['wa'])
 st.session_state.data['wa'] = wa_input
 
 # --- BAGIAN 1: COVER ---
@@ -138,11 +145,8 @@ if img_file:
     if st.button("🔍 Baca Cover"):
         with st.spinner("Membaca..."):
             with open("temp.jpg", "wb") as f: f.write(img_file.getbuffer())
-            prompt = """Analisis Cover. Ambil: 1.Judul(KAPITAL), 2.Nama(Bersih), 3.NIM(Angka), 4.Prodi. JSON: {"judul":"..","nama":"..","nim":"..","prodi":".."}"""
             try:
-                f_ai = genai.upload_file("temp.jpg")
-                res = model_flash.generate_content([f_ai, prompt])
-                json_res = clean_json(res.text)
+                json_res = ai_cover("temp.jpg")
                 if json_res:
                     st.session_state.data.update({
                         'nama': json_res.get('nama', ''), 'judul': json_res.get('judul', ''),
@@ -169,13 +173,10 @@ wd_file = st.file_uploader("Upload Wadek", type=["jpg","png","jpeg"], key="wd_up
 
 if wd_file:
     if st.button("🧠 Cek Pembimbing"):
-        with st.spinner("Analisis Dosen..."):
+        with st.spinner("Analisis Dosen & Mencocokkan Database..."):
             with open("temp_wd.jpg", "wb") as f: f.write(wd_file.getbuffer())
-            prompt = """Analisis tulisan tangan. Cari Pembimbing 1 & 2. JSON: {"pb1":"..","pb2":".."}"""
             try:
-                f_ai = genai.upload_file("temp_wd.jpg")
-                res = model_pro.generate_content([f_ai, prompt])
-                json_res = clean_json(res.text)
+                json_res = clean_json(model.generate_content([genai.upload_file("temp_wd.jpg"), "Analisis tulisan tangan. Cari Pembimbing 1 & 2. JSON: {\"pb1\":\"..\",\"pb2\":\"..\"}"]).text)
                 if json_res:
                     st.session_state.data['pb1'] = cari_dosen_termirip(json_res.get('pb1', ''))
                     st.session_state.data['pb2'] = cari_dosen_termirip(json_res.get('pb2', ''))
@@ -190,42 +191,14 @@ with st.expander("👨‍🏫 Cek Pembimbing", expanded=True):
 st.markdown("---")
 col_btn1, col_btn2 = st.columns(2)
 
-# Tombol 1: Hanya Download (Buat Pegangan Mahasiswa)
+# Tombol 1: Hanya Download
 with col_btn1:
     if st.button("📄 Generate Draft"):
         d = st.session_state.data
         if not d['nama']: st.warning("Nama Kosong!")
         elif not os.path.exists(TEMPLATE_FILENAME): st.error("Template Hilang!")
         else:
-            doc = DocxTemplate(TEMPLATE_FILENAME)
-            now = datetime.now()
-            # ... (Logika Tanggal Sama) ...
-            bln_indo = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
-            bln_rom = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"]
-            ctx = {
-                'nama': d['nama'], 'nim': d['nim'], 'semester': d['sem'],
-                'prodi': d['prodi'], 'judul': d['judul'],
-                'pembimbing1': d['pb1'], 'pembimbing2': d['pb2'],
-                'tanggal': f"Ternate, {now.day} {bln_indo[now.month-1]} {now.year}",
-                'bulan': bln_rom[now.month-1]
-            }
-            doc.render(ctx)
-            out = f"SK_{d['nim']}.docx"
-            doc.save(out)
-            with open(out, "rb") as f:
-                st.download_button("⬇️ Download di HP", f, file_name=out)
-
-# Tombol 2: KIRIM KE ADMIN (Final)
-with col_btn2:
-    if st.button("🚀 KIRIM KE ADMIN", type="primary"):
-        if not st.session_state.data['wa']:
-            st.warning("⚠️ Isi Nomor WA dulu di paling atas!")
-        elif not st.session_state.data['nama']:
-            st.warning("⚠️ Data belum lengkap!")
-        else:
-            with st.spinner("Sedang mengirim ke Telegram Admin..."):
-                # 1. Generate dulu (jika belum)
-                d = st.session_state.data
+            try:
                 doc = DocxTemplate(TEMPLATE_FILENAME)
                 now = datetime.now()
                 bln_indo = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
@@ -240,9 +213,37 @@ with col_btn2:
                 doc.render(ctx)
                 out = f"SK_{d['nim']}.docx"
                 doc.save(out)
+                with open(out, "rb") as f:
+                    st.download_button("⬇️ Download di HP", f, file_name=out)
+            except Exception as e: st.error(f"Gagal generate: {e}")
 
-               # GANTI LOGIKA IF/ELSE DI BAGIAN TOMBOL KIRIM
-                # 2. Kirim ke Telegram (Tangkap pesan errornya)
+# Tombol 2: KIRIM KE ADMIN
+with col_btn2:
+    if st.button("🚀 KIRIM KE ADMIN", type="primary"):
+        if not st.session_state.data['wa']: st.warning("⚠️ Isi Nomor WA!")
+        elif not st.session_state.data['nama']: st.warning("⚠️ Data belum lengkap!")
+        else:
+            with st.spinner("Sedang mengirim ke Telegram Admin..."):
+                d = st.session_state.data
+                try:
+                    # 1. Generate Dokumen
+                    doc = DocxTemplate(TEMPLATE_FILENAME)
+                    now = datetime.now()
+                    bln_indo = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
+                    bln_rom = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"]
+                    ctx = {
+                        'nama': d['nama'], 'nim': d['nim'], 'semester': d['sem'], 'prodi': d['prodi'], 'judul': d['judul'],
+                        'pembimbing1': d['pb1'], 'pembimbing2': d['pb2'], 'tanggal': f"Ternate, {now.day} {bln_indo[now.month-1]} {now.year}",
+                        'bulan': bln_rom[now.month-1]
+                    }
+                    doc.render(ctx)
+                    out = f"SK_{d['nim']}.docx"
+                    doc.save(out)
+                except Exception as e:
+                    st.error(f"❌ Gagal Generate Dokumen: {e}")
+                    return
+
+                # 2. Kirim ke Telegram
                 sukses, pesan_info = kirim_ke_admin_telegram(out, d)
                 
                 if sukses:
@@ -250,11 +251,5 @@ with col_btn2:
                     st.info("Tunggu Admin mengirim file PDF yang sudah ditanda tangani ke WhatsApp Anda.")
                     st.balloons()
                 else:
-                    # Tampilkan Pesan Error Asli di Kotak Merah
                     st.error(f"❌ GAGAL KIRIM: {pesan_info}")
-
-                    st.warning("Tips: Cek TELEGRAM_TOKEN dan ADMIN_ID di file app.py Anda.")
-
-
-
-
+                    st.warning("Tips: Cek TELEGRAM_TOKEN dan ADMIN_ID di Secrets Anda.")
