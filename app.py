@@ -27,10 +27,10 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# Setup AI (KOREKSI: Tambah 'models/' di nama model)
+# Setup AI (KOREKSI: Menggunakan nama alias model yang berbeda)
 try:
     genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel("models/gemini-1.5-flash") 
+    model = genai.GenerativeModel("gemini-2.5-flash") # <--- KOREKSI DI SINI
 except Exception as e:
     st.error(f"❌ Error Setup AI. Cek GEMINI_API_KEY di Secrets: {e}")
 
