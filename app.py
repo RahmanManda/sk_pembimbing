@@ -32,7 +32,7 @@ st.markdown("""
 try:
     genai.configure(api_key=GEMINI_API_KEY)
     model_flash = genai.GenerativeModel("gemini-1.5-flash")
-    model_pro = genai.GenerativeModel("gemini-1.5-pro")
+    #model_pro = genai.GenerativeModel("gemini-1.5-pro")
 except:
     st.error("API Key belum diset!")
 
@@ -254,6 +254,7 @@ with col_btn2:
                     st.error(f"❌ GAGAL KIRIM: {pesan_info}")
 
                     st.warning("Tips: Cek TELEGRAM_TOKEN dan ADMIN_ID di file app.py Anda.")
+
 
 
 
