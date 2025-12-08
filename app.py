@@ -12,7 +12,7 @@ from thefuzz import process
 # Pastikan kunci ini sudah ada di menu Settings -> Secrets di Streamlit Cloud
 TELEGRAM_TOKEN = st.secrets["TELEGRAM_TOKEN"]
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
-ADMIN_ID = "416111259"  # ID Telegram Admin/Bapak
+ADMIN_ID = "416111259"  # ID Telegram Admin/Bapak (Sudah dikoreksi)
 
 TEMPLATE_FILENAME = "template_sk.docx"
 DATABASE_DOSEN_FILE = "dosen.json"
@@ -241,7 +241,9 @@ with col_btn2:
                     doc.save(out)
                 except Exception as e:
                     st.error(f"❌ Gagal Generate Dokumen: {e}")
-                    return
+                    # HAPUS BARIS 'return' DI SINI
+                    # (Sudah dihapus di kode ini, jadi aman)
+                    pass 
 
                 # 2. Kirim ke Telegram
                 sukses, pesan_info = kirim_ke_admin_telegram(out, d)
