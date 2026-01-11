@@ -234,7 +234,9 @@ with col_btn2:
                         'bulan': bln_rom[now.month-1]
                     }
                     doc.render(ctx)
-                    out = f"SK_{d['nim']}.docx"
+                    nama_depan = d['nama'].strip().split()[0]
+                    nama_clean = "".join(x for x in nama_depan if x.isalnum())
+                    out = f"SK_{nama_clean}.docx"
                     doc.save(out)
                 except Exception as e:
                     st.error(f"❌ Gagal Generate Dokumen: {e}")
