@@ -8,17 +8,22 @@ from datetime import datetime
 from docxtpl import DocxTemplate
 from thefuzz import process
 
-# ================= KONFIGURASI (DIAMBIL DARI STREAMLIT SECRETS) =================
-TELEGRAM_TOKEN = st.secrets["TELEGRAM_TOKEN"]
-GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
-ADMIN_ID = "416111259"
+# ================= KONFIGURASI =================
+try:
+    TELEGRAM_TOKEN = st.secrets["TELEGRAM_TOKEN"]
+    # Khusus SK Pembimbing, kita butuh Gemini untuk baca tulisan tangan Wadek
+    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"] 
+except:
+    st.error("Error: Cek secrets.toml. Pastikan TELEGRAM_TOKEN dan GEMINI_API_KEY sudah ada.")
+    st.stop()
 
+ADMIN_ID = "416111259"
 TEMPLATE_FILENAME = "template_sk.docx"
 DATABASE_DOSEN_FILE = "dosen.json"
 
 st.set_page_config(page_title="SK Pembimbing", page_icon="🎓", layout="centered")
 
-# CSS Styling (Untuk kerapian di HP)
+# CSS Agar Tampilan Rapi
 st.markdown("""
     <style>
     .stButton>button { width: 100%; border-radius: 10px; height: 3em; font-weight: bold; }
@@ -27,228 +32,179 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# Setup AI (KOREKSI: Menggunakan nama alias model yang berbeda)
+# Setup AI
 try:
     genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel("gemini-2.5-flash") # <--- KOREKSI DI SINI
+    model = genai.GenerativeModel("gemini-1.5-flash")
 except Exception as e:
-    st.error(f"❌ Error Setup AI. Cek GEMINI_API_KEY di Secrets: {e}")
+    st.error(f"❌ Error Setup AI: {e}")
 
-# ================= FUNGSI TELEGRAM =================
+# ================= FUNGSI HELPER =================
+
+def format_sem_otomatis(angka):
+    """Mengubah angka '7' menjadi 'VII (Tujuh)'"""
+    try:
+        n = int(angka)
+        rom = ["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII", "XIII", "XIV"]
+        txt = ["", "Satu", "Dua", "Tiga", "Empat", "Lima", "Enam", "Tujuh", "Delapan", "Sembilan", "Sepuluh", "Sebelas", "Dua Belas", "Tiga Belas", "Empat Belas"]
+        if 0 < n < 15:
+            return f"{rom[n]} ({txt[n]})"
+        return str(angka)
+    except:
+        return str(angka)
+
 def kirim_ke_admin_telegram(file_path, data_mhs):
     clean_token = TELEGRAM_TOKEN.strip()
     url = f"https://api.telegram.org/bot{clean_token}/sendDocument"
     
-    nomor_wa = data_mhs['wa'].strip()
-    if nomor_wa.startswith("0"): wa_link = "62" + nomor_wa[1:]
-    elif nomor_wa.startswith("62"): wa_link = nomor_wa
-    else: wa_link = "62" + nomor_wa
+    wa = data_mhs['wa'].strip()
+    wa_link = "62" + wa[1:] if wa.startswith("0") else (wa if wa.startswith("62") else "62" + wa)
     
     caption = (
-        f"🚨 **PENGAJUAN SK VIA WEB**\n\n"
-        f"👤 Nama: {data_mhs['nama']}\n"
-        f"🆔 NIM: {data_mhs['nim']}\n"
-        f"📱 WA: [{nomor_wa}](https://wa.me/{wa_link}) (Klik untuk kirim PDF)\n\n"
-        f"👉 Silakan TTE file ini, lalu kirim PDF-nya ke mahasiswa via Link WA di atas."
+        f"🚨 **PENGAJUAN SK PEMBIMBING**\n"
+        f"👤 {data_mhs['nama'].upper()} ({data_mhs['nim']})\n"
+        f"📱 WA: [{wa}](https://wa.me/{wa_link})\n"
+        f"👉 Silakan TTE dan kirim balik ke mahasiswa."
     )
     
     try:
         with open(file_path, 'rb') as f:
             payload = {'chat_id': ADMIN_ID, 'caption': caption, 'parse_mode': 'Markdown'}
-            files = {'document': f}
-            resp = requests.post(url, data=payload, files=files)
-            if resp.status_code == 200: return True, "Berhasil"
-            else: return False, f"Error Telegram ({resp.status_code}): {resp.text}"
+            resp = requests.post(url, data=payload, files={'document': f})
+            if resp.status_code == 200: return True, "OK"
+            return False, f"Telegram Error: {resp.text}"
     except Exception as e:
-        return False, f"Error Sistem: {str(e)}"
-
-# ================= FUNGSI HELPER LAINNYA =================
-def load_database_dosen():
-    if os.path.exists(DATABASE_DOSEN_FILE):
-        try:
-            with open(DATABASE_DOSEN_FILE, 'r') as f: return json.load(f)
-        except: return []
-    return []
-
-def cari_dosen_termirip(nama_input):
-    db_dosen = load_database_dosen()
-    if not db_dosen or not nama_input: return nama_input
-    hasil, skor = process.extractOne(nama_input, db_dosen)
-    if skor > 65: return hasil
-    return nama_input
-
-def format_sem(angka):
-    romawi = ["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII", "XIII", "XIV"]
-    kata = ["", "Satu", "Dua", "Tiga", "Empat", "Lima", "Enam", "Tujuh", "Delapan", "Sembilan", "Sepuluh", "Sebelas", "Dua Belas", "Tiga Belas", "Empat Belas"]
-    try:
-        idx = int(angka)
-        if 0 < idx < 15: return f"{romawi[idx]} ({kata[idx]})"
-        return str(idx)
-    except: return str(angka)
-
-def hitung_sem(nim):
-    try:
-        thn = 2000 + int(nim[:2])
-        now = datetime.now()
-        sem = (now.year - thn) * 2
-        if now.month >= 9 or now.month <= 2: sem += 1
-        return max(1, sem)
-    except: return 1
+        return False, str(e)
 
 def clean_json(txt):
     m = re.search(r'\{.*\}', txt, re.DOTALL)
     if m: return json.loads(m.group(0))
     return None
 
-# ================= FUNGSI AI (HANYA FLASH) =================
-
-def ai_cover(path):
-    prompt = """Analisis Cover. Ambil: 1.Judul(KAPITAL), 2.Nama(Bersih), 3.NIM(Angka), 4.Prodi. JSON: {"judul":"..","nama":"..","nim":"..","prodi":".."}"""
-    try:
-        f_ai = genai.upload_file(path)
-        res = model.generate_content([f_ai, prompt])
-        return clean_json(res.text)
-    except: return None
-
-def ai_wadek(path):
-    prompt = """Analisis tulisan tangan. Cari Pembimbing 1 & 2. JSON: {"pb1":"..","pb2":".."}"""
-    try:
-        f_ai = genai.upload_file(path)
-        res = model.generate_content([f_ai, prompt])
-        return clean_json(res.text)
-    except: return None
+def cari_dosen(nama):
+    if not os.path.exists(DATABASE_DOSEN_FILE): return nama
+    with open(DATABASE_DOSEN_FILE, 'r', encoding='utf-8') as f: db = json.load(f)
+    # Cari nama dosen yang paling mirip di database
+    res, skor = process.extractOne(nama, db)
+    return res if skor > 65 else nama
 
 # ================= UI APLIKASI =================
-
 st.title("🎓 SK Pembimbing")
 st.caption("Fakultas Tarbiyah & Ilmu Keguruan")
 
-# Init Session
 if 'data' not in st.session_state: 
-    st.session_state.data = {'nama': '', 'nim': '', 'judul': '', 'prodi': '', 'sem': '', 'pb1': '', 'pb2': '', 'wa': ''}
+    st.session_state.data = {'nama': '', 'nim': '', 'sem': '', 'prodi': '', 'judul': '', 'pb1': '', 'pb2': '', 'wa': ''}
 
-# --- BAGIAN 0: INPUT WA ---
-st.info("📱 **Data Kontak**")
-wa_input = st.text_input("Nomor WhatsApp (Contoh: 08123456789)", st.session_state.data['wa'])
-st.session_state.data['wa'] = wa_input
+d = st.session_state.data
 
-# --- BAGIAN 1: COVER ---
+# 1. INPUT WA
+st.info("📱 **Kontak Mahasiswa**")
+d['wa'] = st.text_input("Nomor WhatsApp (Wajib)", d['wa'])
+
+# 2. INPUT COVER (SCAN AI)
 st.markdown("---")
-st.info("📸 **Langkah 1: Foto Cover Proposal**")
-input_method = st.radio("Input Cover:", ["📁 Galeri", "📷 Kamera"], horizontal=True, label_visibility="collapsed")
-img_file = st.file_uploader("Upload Cover", type=["jpg","png","jpeg"]) if input_method == "📁 Galeri" else st.camera_input("Jepret Cover")
+st.info("📸 **Identitas & Judul**")
+with st.expander("Buka Kamera / Upload Cover"):
+    src_cv = st.radio("Sumber:", ["📁 Upload", "📷 Kamera"], horizontal=True, key="src_cv", label_visibility="collapsed")
+    img_cv = st.file_uploader("File Cover", ["jpg","png"]) if src_cv == "📁 Upload" else st.camera_input("Foto Cover")
 
-if img_file:
-    if st.button("🔍 Baca Cover"):
-        with st.spinner("Membaca..."):
-            with open("temp.jpg", "wb") as f: f.write(img_file.getbuffer())
+    if img_cv and st.button("🔍 Scan Cover Otomatis"):
+        with st.spinner("AI sedang membaca..."):
+            with open("temp.jpg", "wb") as f: f.write(img_cv.getbuffer())
             try:
-                json_res = ai_cover("temp.jpg")
-                if json_res:
-                    st.session_state.data.update({
-                        'nama': json_res.get('nama', ''), 'judul': json_res.get('judul', ''),
-                        'prodi': json_res.get('prodi', 'Manajemen Pendidikan Islam'),
-                        'nim': str(json_res.get('nim', '')).replace(" ", "")
-                    })
-                    st.session_state.data['sem'] = format_sem(hitung_sem(st.session_state.data['nim']))
-                    st.success("Cover Terbaca!")
-            except Exception as e: st.error(f"Error: {e}")
+                f_ai = genai.upload_file("temp.jpg")
+                prompt = """Analisis Cover Skripsi ini. Ambil data JSON: {"judul":"..","nama":"..","nim":"..","prodi":".."}"""
+                res = model.generate_content([f_ai, prompt])
+                js = clean_json(res.text)
+                if js:
+                    d.update(js)
+                    d['nim'] = str(js.get('nim','')).replace(" ","")
+                    # Tidak perlu hitung semester manual, biarkan user isi angka
+                    st.success("Cover terbaca! Silakan cek di bawah.")
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Gagal baca cover: {e}")
 
-with st.expander("📝 Cek Data Identitas", expanded=True):
-    st.session_state.data['nama'] = st.text_input("Nama", st.session_state.data['nama'])
-    c1, c2 = st.columns(2)
-    with c1: st.session_state.data['nim'] = st.text_input("NIM", st.session_state.data['nim'])
-    with c2: st.session_state.data['sem'] = st.text_input("Semester", st.session_state.data['sem'])
-    st.session_state.data['prodi'] = st.text_input("Prodi", st.session_state.data['prodi'])
-    st.session_state.data['judul'] = st.text_area("Judul", st.session_state.data['judul'])
+# FORM MANUAL (Override)
+d['nama'] = st.text_input("Nama", d['nama'])
+c1, c2 = st.columns(2)
+with c1: d['nim'] = st.text_input("NIM", d['nim'])
+with c2: d['sem'] = st.text_input("Semester (Culis tulis angka, misal: 7)", d['sem'])
+d['prodi'] = st.text_input("Prodi", d.get('prodi', 'Manajemen Pendidikan Islam'))
+d['judul'] = st.text_area("Judul", d['judul'])
 
-# --- BAGIAN 2: WADEK ---
+
+# 3. INPUT WADEK (SCAN AI)
 st.markdown("---")
-st.info("📸 **Langkah 2: Foto Catatan Wadek**")
-input_wd = st.radio("Input Wadek:", ["📁 Galeri ", "📷 Kamera "], horizontal=True, label_visibility="collapsed")
-wd_file = st.file_uploader("Upload Wadek", type=["jpg","png","jpeg"], key="wd_up") if input_wd == "📁 Galeri " else st.camera_input("Jepret Wadek", key="wd_cam")
+st.info("👨‍🏫 **Pembimbing (Catatan Wadek)**")
+with st.expander("Buka Kamera / Upload Catatan"):
+    src_wd = st.radio("Sumber:", ["📁 Upload", "📷 Kamera"], horizontal=True, key="src_wd", label_visibility="collapsed")
+    img_wd = st.file_uploader("File Wadek", ["jpg","png"]) if src_wd == "📁 Upload" else st.camera_input("Foto Wadek")
 
-if wd_file:
-    if st.button("🧠 Cek Pembimbing"):
-        with st.spinner("Analisis Dosen & Mencocokkan Database..."):
-            with open("temp_wd.jpg", "wb") as f: f.write(wd_file.getbuffer())
+    if img_wd and st.button("🧠 Scan Tulisan Wadek"):
+        with st.spinner("Membaca tulisan tangan..."):
+            with open("temp_wd.jpg", "wb") as f: f.write(img_wd.getbuffer())
             try:
-                json_res = clean_json(model.generate_content([genai.upload_file("temp_wd.jpg"), "Analisis tulisan tangan. Cari Pembimbing 1 & 2. JSON: {\"pb1\":\"..\",\"pb2\":\"..\"}"]).text)
-                if json_res:
-                    st.session_state.data['pb1'] = cari_dosen_termirip(json_res.get('pb1', ''))
-                    st.session_state.data['pb2'] = cari_dosen_termirip(json_res.get('pb2', ''))
-                    st.success("Dosen Ditemukan!")
-            except Exception as e: st.error(f"Error: {e}")
+                f_ai = genai.upload_file("temp_wd.jpg")
+                prompt = """Baca tulisan tangan ini. Cari nama 2 dosen pembimbing. JSON: {"pb1":"Nama Dosen 1","pb2":"Nama Dosen 2"}"""
+                res = model.generate_content([f_ai, prompt])
+                js = clean_json(res.text)
+                if js:
+                    d['pb1'] = cari_dosen(js.get('pb1',''))
+                    d['pb2'] = cari_dosen(js.get('pb2',''))
+                    st.success("Dosen terbaca!")
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Gagal baca dosen: {e}")
 
-with st.expander("👨‍🏫 Cek Pembimbing", expanded=True):
-    st.session_state.data['pb1'] = st.text_input("Pembimbing 1", st.session_state.data['pb1'])
-    st.session_state.data['pb2'] = st.text_input("Pembimbing 2", st.session_state.data['pb2'])
+d['pb1'] = st.text_input("Pembimbing 1", d['pb1'])
+d['pb2'] = st.text_input("Pembimbing 2", d['pb2'])
 
-# --- BAGIAN 3: EKSEKUSI ---
+# 4. TOMBOL KIRIM
 st.markdown("---")
-col_btn1, col_btn2 = st.columns(2)
-
-# Tombol 1: Hanya Download
-with col_btn1:
-    if st.button("📄 Generate Draft"):
-        d = st.session_state.data
-        if not d['nama']: st.warning("Nama Kosong!")
-        elif not os.path.exists(TEMPLATE_FILENAME): st.error("Template Hilang!")
-        else:
+if st.button("🚀 KIRIM KE ADMIN", type="primary"):
+    if not d['wa'] or not d['nama']:
+        st.warning("⚠️ Nama dan Nomor WA wajib diisi!")
+    else:
+        with st.spinner("Mengirim ke Telegram..."):
             try:
-                doc = DocxTemplate(TEMPLATE_FILENAME)
+                # Setup Tanggal & Format
                 now = datetime.now()
-                bln_indo = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
-                bln_rom = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"]
-                ctx = {
-                    'nama': d['nama'], 'nim': d['nim'], 'semester': d['sem'],
-                    'prodi': d['prodi'], 'judul': d['judul'],
-                    'pembimbing1': d['pb1'], 'pembimbing2': d['pb2'],
-                    'tanggal': f"Ternate, {now.day} {bln_indo[now.month-1]} {now.year}",
-                    'bulan': bln_rom[now.month-1]
-                }
-                doc.render(ctx)
-                out = f"SK_{d['nim']}.docx"
-                doc.save(out)
-                with open(out, "rb") as f:
-                    st.download_button("⬇️ Download di HP", f, file_name=out)
-            except Exception as e: st.error(f"Gagal generate: {e}")
-
-# Tombol 2: KIRIM KE ADMIN
-with col_btn2:
-    if st.button("🚀 KIRIM KE ADMIN", type="primary"):
-        if not st.session_state.data['wa']: st.warning("⚠️ Isi Nomor WA!")
-        elif not st.session_state.data['nama']: st.warning("⚠️ Data belum lengkap!")
-        else:
-            with st.spinner("Sedang mengirim ke Telegram Admin..."):
-                d = st.session_state.data
-                try:
-                    # 1. Generate Dokumen
-                    doc = DocxTemplate(TEMPLATE_FILENAME)
-                    now = datetime.now()
-                    bln_indo = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
-                    bln_rom = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"]
-                    ctx = {
-                        'nama': d['nama'], 'nim': d['nim'], 'semester': d['sem'], 'prodi': d['prodi'], 'judul': d['judul'],
-                        'pembimbing1': d['pb1'], 'pembimbing2': d['pb2'], 'tanggal': f"Ternate, {now.day} {bln_indo[now.month-1]} {now.year}",
-                        'bulan': bln_rom[now.month-1]
-                    }
-                    doc.render(ctx)
-                    nama_depan = d['nama'].strip().split()[0]
-                    nama_clean = "".join(x for x in nama_depan if x.isalnum())
-                    out = f"SK_{nama_clean}.docx"
-                    doc.save(out)
-                except Exception as e:
-                    st.error(f"❌ Gagal Generate Dokumen: {e}")
-                    pass # Lanjut ke pengiriman, dokumen tetap ada di server
-
-                # 2. Kirim ke Telegram
-                sukses, pesan_info = kirim_ke_admin_telegram(out, d)
+                bln = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
+                rom_bln = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"]
                 
+                # --- LOGIKA ROMAWI SEMESTER ---
+                txt_semester = format_sem_otomatis(d['sem'])
+                
+                ctx = {
+                    'nama': d['nama'].upper(),   # <--- HURUF BESAR
+                    'nim': d['nim'], 
+                    'semester': txt_semester,    # <--- ROMAWI (VII)
+                    'prodi': d['prodi'].upper(), # <--- HURUF BESAR
+                    'judul': d['judul'].upper(), # <--- HURUF BESAR
+                    'pembimbing1': d['pb1'], 
+                    'pembimbing2': d['pb2'],
+                    'tanggal': f"Ternate, {now.day} {bln[now.month-1]} {now.year}",
+                    'bulan': rom_bln[now.month-1]
+                }
+                
+                doc = DocxTemplate(TEMPLATE_FILENAME)
+                doc.render(ctx)
+                
+                # --- LOGIKA NAMA FILE (NAMA DEPAN) ---
+                nama_depan = d['nama'].strip().split()[0]
+                nama_clean = "".join(x for x in nama_depan if x.isalnum())
+                out = f"SK_{nama_clean}.docx" 
+                # -------------------------------------
+
+                doc.save(out)
+                
+                # Kirim Telegram
+                sukses, msg = kirim_ke_admin_telegram(out, d)
                 if sukses:
-                    st.success("✅ BERHASIL! Surat sudah masuk ke Telegram Admin.")
-                    st.info("Tunggu Admin mengirim file PDF yang sudah ditanda tangani ke WhatsApp Anda.")
                     st.balloons()
+                    st.success(f"✅ BERHASIL! File '{out}' sudah masuk ke Telegram Admin.")
                 else:
-                    st.error(f"❌ GAGAL KIRIM: {pesan_info}")
-                    st.warning("Tips: Cek TELEGRAM_TOKEN dan ADMIN_ID di Secrets Anda.")
+                    st.error(f"❌ Gagal Kirim Telegram: {msg}")
+            except Exception as e:
+                st.error(f"System Error: {e}")
