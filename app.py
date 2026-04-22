@@ -11,13 +11,13 @@ from thefuzz import process
 # ================= KONFIGURASI =================
 try:
     TELEGRAM_TOKEN = st.secrets["TELEGRAM_TOKEN"]
-    # Khusus SK Pembimbing, kita butuh Gemini untuk baca tulisan tangan Wadek
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"] 
 except:
     st.error("Error: Cek secrets.toml. Pastikan TELEGRAM_TOKEN dan GEMINI_API_KEY sudah ada.")
     st.stop()
 
-ADMIN_ID = "416111259"
+# ID GRUP ADMIN (Sudah disesuaikan ke grup)
+GROUP_CHAT_ID = "-5193774282" 
 TEMPLATE_FILENAME = "template_sk.docx"
 DATABASE_DOSEN_FILE = "dosen.json"
 
@@ -53,23 +53,30 @@ def format_sem_otomatis(angka):
     except:
         return str(angka)
 
-def kirim_ke_admin_telegram(file_path, data_mhs):
+def kirim_ke_grup_telegram(file_path, data_mhs):
     clean_token = TELEGRAM_TOKEN.strip()
     url = f"https://api.telegram.org/bot{clean_token}/sendDocument"
     
     wa = data_mhs['wa'].strip()
     wa_link = "62" + wa[1:] if wa.startswith("0") else (wa if wa.startswith("62") else "62" + wa)
     
+    # Caption dipertegas agar Admin grup bisa membedakan jenis surat
     caption = (
-        f"🚨 **PENGAJUAN SK PEMBIMBING**\n"
-        f"👤 {data_mhs['nama'].upper()} ({data_mhs['nim']})\n"
-        f"📱 WA: [{wa}](https://wa.me/{wa_link})\n"
-        f"👉 Silakan TTE dan kirim balik ke mahasiswa."
+        f"🎓 **[PENGAJUAN SK PEMBIMBING]** 🎓\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"👤 **Nama:** {data_mhs['nama'].upper()}\n"
+        f"🆔 **NIM:** {data_mhs['nim']}\n"
+        f"📚 **Prodi:** {data_mhs['prodi']}\n"
+        f"👨‍🏫 **PB 1:** {data_mhs['pb1']}\n"
+        f"👨‍🏫 **PB 2:** {data_mhs['pb2']}\n"
+        f"📱 **WA:** [Hubungi Mahasiswa](https://wa.me/{wa_link})\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"👉 *Admin: Mohon segera proses SK Penunjukan Pembimbing ini.*"
     )
     
     try:
         with open(file_path, 'rb') as f:
-            payload = {'chat_id': ADMIN_ID, 'caption': caption, 'parse_mode': 'Markdown'}
+            payload = {'chat_id': GROUP_CHAT_ID, 'caption': caption, 'parse_mode': 'Markdown'}
             resp = requests.post(url, data=payload, files={'document': f})
             if resp.status_code == 200: return True, "OK"
             return False, f"Telegram Error: {resp.text}"
@@ -83,10 +90,12 @@ def clean_json(txt):
 
 def cari_dosen(nama):
     if not os.path.exists(DATABASE_DOSEN_FILE): return nama
-    with open(DATABASE_DOSEN_FILE, 'r', encoding='utf-8') as f: db = json.load(f)
-    # Cari nama dosen yang paling mirip di database
-    res, skor = process.extractOne(nama, db)
-    return res if skor > 65 else nama
+    try:
+        with open(DATABASE_DOSEN_FILE, 'r', encoding='utf-8') as f: db = json.load(f)
+        res, skor = process.extractOne(nama, db)
+        return res if skor > 65 else nama
+    except:
+        return nama
 
 # ================= UI APLIKASI =================
 st.title("🎓 SK Pembimbing")
@@ -119,7 +128,6 @@ with st.expander("Buka Kamera / Upload Cover"):
                 if js:
                     d.update(js)
                     d['nim'] = str(js.get('nim','')).replace(" ","")
-                    # Tidak perlu hitung semester manual, biarkan user isi angka
                     st.success("Cover terbaca! Silakan cek di bawah.")
                     st.rerun()
             except Exception as e:
@@ -129,7 +137,7 @@ with st.expander("Buka Kamera / Upload Cover"):
 d['nama'] = st.text_input("Nama", d['nama'])
 c1, c2 = st.columns(2)
 with c1: d['nim'] = st.text_input("NIM", d['nim'])
-with c2: d['sem'] = st.text_input("Semester (Culis tulis angka, misal: 7)", d['sem'])
+with c2: d['sem'] = st.text_input("Semester (Angka)", d['sem'])
 d['prodi'] = st.text_input("Prodi", d.get('prodi', 'Manajemen Pendidikan Islam'))
 d['judul'] = st.text_area("Judul", d['judul'])
 
@@ -162,26 +170,24 @@ d['pb2'] = st.text_input("Pembimbing 2", d['pb2'])
 
 # 4. TOMBOL KIRIM
 st.markdown("---")
-if st.button("🚀 KIRIM KE ADMIN", type="primary"):
+if st.button("🚀 KIRIM KE GRUP ADMIN", type="primary"):
     if not d['wa'] or not d['nama']:
         st.warning("⚠️ Nama dan Nomor WA wajib diisi!")
     else:
-        with st.spinner("Mengirim ke Telegram..."):
+        with st.spinner("Mengirim ke Grup Telegram..."):
             try:
-                # Setup Tanggal & Format
                 now = datetime.now()
                 bln = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
                 rom_bln = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"]
                 
-                # --- LOGIKA ROMAWI SEMESTER ---
                 txt_semester = format_sem_otomatis(d['sem'])
                 
                 ctx = {
-                    'nama': d['nama'].upper(),   # <--- HURUF BESAR
+                    'nama': d['nama'].upper(),
                     'nim': d['nim'], 
-                    'semester': txt_semester,    # <--- ROMAWI (VII)
-                    'prodi': d['prodi'].upper(), # <--- HURUF BESAR
-                    'judul': d['judul'].upper(), # <--- HURUF BESAR
+                    'semester': txt_semester,
+                    'prodi': d['prodi'].upper(),
+                    'judul': d['judul'].upper(),
                     'pembimbing1': d['pb1'], 
                     'pembimbing2': d['pb2'],
                     'tanggal': f"Ternate, {now.day} {bln[now.month-1]} {now.year}",
@@ -191,20 +197,20 @@ if st.button("🚀 KIRIM KE ADMIN", type="primary"):
                 doc = DocxTemplate(TEMPLATE_FILENAME)
                 doc.render(ctx)
                 
-                # --- LOGIKA NAMA FILE (NAMA DEPAN) ---
+                # Penamaan file agar jelas ini SK Pembimbing
                 nama_depan = d['nama'].strip().split()[0]
                 nama_clean = "".join(x for x in nama_depan if x.isalnum())
-                out = f"SK_{nama_clean}.docx" 
-                # -------------------------------------
+                out = f"SK_Pembimbing_{nama_clean}.docx" 
 
                 doc.save(out)
                 
-                # Kirim Telegram
-                sukses, msg = kirim_ke_admin_telegram(out, d)
+                # Kirim ke Telegram Grup
+                sukses, msg = kirim_ke_grup_telegram(out, d)
                 if sukses:
                     st.balloons()
-                    st.success(f"✅ BERHASIL! File '{out}' sudah masuk ke Telegram Admin.")
+                    st.success(f"✅ BERHASIL! File '{out}' sudah masuk ke Grup Admin.")
+                    if os.path.exists(out): os.remove(out)
                 else:
-                    st.error(f"❌ Gagal Kirim Telegram: {msg}")
+                    st.error(f"❌ Gagal Kirim ke Grup: {msg}")
             except Exception as e:
                 st.error(f"System Error: {e}")
